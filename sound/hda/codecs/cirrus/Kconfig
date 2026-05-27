@@ -34,9 +34,11 @@ comment "Set to Y if you want auto-loading the codec driver"
 config SND_HDA_CODEC_CS8409
 	tristate "Build Cirrus Logic HDA bridge support"
 	select SND_HDA_GENERIC
+	select SND_HDA_RECONFIG
 	help
 	  Say Y or M here to include Cirrus Logic HDA bridge support
-	  such as CS8409.
+	  such as CS8409.  Includes the Apple MacBookPro / iMac CS8409 +
+	  CS42L83 + amplifier topology used in T2-era Macs.
 
 comment "Set to Y if you want auto-loading the codec driver"
 	depends on SND_HDA=y && SND_HDA_CODEC_CS8409=m

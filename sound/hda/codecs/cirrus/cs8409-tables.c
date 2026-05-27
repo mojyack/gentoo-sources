@@ -554,6 +554,13 @@ const struct hda_quirk cs8409_fixup_tbl[] = {
 	SND_PCI_QUIRK(0x1028, 0x0C75, "Dolphin", CS8409_DOLPHIN),
 	SND_PCI_QUIRK(0x1028, 0x0C7D, "Dolphin", CS8409_DOLPHIN),
 	SND_PCI_QUIRK(0x1028, 0x0C7F, "Dolphin", CS8409_DOLPHIN),
+	/* Apple machines are matched on the codec SSID, not the (Apple) PCI SSID */
+	HDA_CODEC_QUIRK(0x106b, 0x3900, "MacBookPro14,3", CS8409_MBP),
+	HDA_CODEC_QUIRK(0x106b, 0x3300, "MacBookPro13/14", CS8409_MBP),
+	HDA_CODEC_QUIRK(0x106b, 0x3600, "MacBookPro14,2", CS8409_MBP),
+	HDA_CODEC_QUIRK(0x106b, 0x1000, "iMac", CS8409_MBP),
+	HDA_CODEC_QUIRK(0x106b, 0x0f00, "iMac", CS8409_MBP),
+	HDA_CODEC_QUIRK(0x106b, 0x0e00, "iMac", CS8409_MBP),
 	{} /* terminator */
 };
 
@@ -620,4 +627,6 @@ const struct hda_fixup cs8409_fixups[] = {
 		.chained = true,
 		.chain_id = CS8409_FIXUPS,
 	},
+	/* Apple bring-up is handled entirely by cs8409_apple(); no fixup actions */
+	[CS8409_MBP] = {},
 };

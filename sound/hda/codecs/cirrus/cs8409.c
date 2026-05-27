@@ -14,6 +14,7 @@
 #include <linux/iopoll.h>
 
 #include "cs8409.h"
+#include "cirrus_apple.h"
 
 /******************************************************************************
  *                        CS8409 Specific Functions
@@ -390,7 +391,7 @@ static void cs8409_enable_ur(struct hda_codec *codec, int flag)
 			    flag ? AC_UNSOL_ENABLED : 0);
 }
 
-static void cs8409_fix_caps(struct hda_codec *codec, unsigned int nid)
+void cs8409_fix_caps(struct hda_codec *codec, unsigned int nid)
 {
 	int caps;
 
@@ -1430,7 +1431,19 @@ static int cs8409_probe(struct hda_codec *codec, const struct hda_device_id *id)
 	if (!cs8409_alloc_spec(codec))
 		return -ENOMEM;
 
+	codec_info(codec, "Primary cs8409\n");
+
 	snd_hda_pick_fixup(codec, cs8409_models, cs8409_fixup_tbl, cs8409_fixups);
+
+	// Apple machines are matched via codec SSID -> CS8409_MBP and handled by a
+	// separate bring-up path. Free the spec just allocated (this also undoes the
+	// delayed work as we are not using the mutex yet) and hand over to cs8409_apple().
+	if (codec->fixup_id == CS8409_MBP) {
+		codec_info(codec, "CS8409 Apple machine, using Apple bring-up\n");
+		cs8409_remove(codec);
+		err = cs8409_apple(codec);
+		return err;
+	}
 
 	codec_dbg(codec, "Picked ID=%d, VID=%08x, DEV=%08x\n", codec->fixup_id,
 			 codec->bus->pci->subsystem_vendor,
@@ -1458,6 +1471,7 @@ static const struct hda_codec_ops cs8409_codec_ops = {
 	.suspend = cs8409_cs42l42_suspend,
 	.stream_pm = snd_hda_gen_stream_pm,
 };
+
 
 static const struct hda_device_id snd_hda_id_cs8409[] = {
 	HDA_CODEC_ID(0x10138409, "CS8409"),
