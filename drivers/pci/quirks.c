@@ -3938,6 +3938,100 @@ static void quirk_apple_poweroff_thunderbolt(struct pci_dev *dev)
 DECLARE_PCI_FIXUP_SUSPEND_LATE(PCI_VENDOR_ID_INTEL,
 			       PCI_DEVICE_ID_INTEL_CACTUS_RIDGE_4C,
 			       quirk_apple_poweroff_thunderbolt);
+
+/*
+ * Apple MacBookPro13,x and similar pre-2018 Apple laptops with Intel
+ * Alpine Ridge Thunderbolt controllers (DSL6340/DSL6540) lose Alpine
+ * Ridge power across system sleep: the platform cuts the chip's rail on
+ * S3 entry and provides no non-Darwin AML path to restore it. On resume
+ * the controller and everything behind it (TB upstream switch, NHI and
+ * the integrated xHCI) stay in D3cold and never answer config cycles.
+ *
+ * Thunderbolt is given up on this machine, so we make no attempt to
+ * revive Alpine Ridge. We only need S3 to be clean and resume to be fast:
+ *
+ *  - On suspend, mask the root port's hotplug GPE (RP05 = _GPE._L32,
+ *    RP09 = _GPE._L33). It would otherwise fire when the platform drops
+ *    the Alpine Ridge link during S3 and wake the machine immediately.
+ *
+ *  - On resume, mark the whole Alpine Ridge subtree disconnected before
+ *    the PCI core waits on it. Otherwise pci_dev_wait() spins up to the
+ *    60 s poll cap per device ("not ready 65535ms after resume; giving
+ *    up"), making every resume take a minute or more.
+ *
+ * The fixups are keyed on the Sunrise Point-LP PCH root port IDs, which
+ * also appear on non-Apple machines, so each one first confirms it is the
+ * Alpine Ridge topology by resolving UPSB.DSB0.NHI0 under the root port.
+ * The resume fixup uses the _EARLY (noirq-phase) variant so it runs
+ * before pci_pm_bridge_power_up_actions() waits on the dead link.
+ */
+#ifdef CONFIG_ACPI
+static bool apple_alpine_ridge_root_port(struct pci_dev *dev)
+{
+	acpi_handle rp_handle, nhi_handle;
+
+	if (!x86_apple_machine)
+		return false;
+
+	rp_handle = ACPI_HANDLE(&dev->dev);
+	if (!rp_handle)
+		return false;
+
+	return ACPI_SUCCESS(acpi_get_handle(rp_handle, "UPSB.DSB0.NHI0",
+					    &nhi_handle));
+}
+
+static u32 apple_alpine_ridge_gpe(struct pci_dev *dev)
+{
+	switch (dev->device) {
+	case 0x9d14: return 0x32;	/* RP05, _GPE._L32 */
+	case 0x9d18: return 0x33;	/* RP09, _GPE._L33 */
+	default:     return 0;
+	}
+}
+
+static void quirk_apple_alpine_ridge_suspend(struct pci_dev *dev)
+{
+	u32 gpe = apple_alpine_ridge_gpe(dev);
+
+	if (!apple_alpine_ridge_root_port(dev) || !gpe)
+		return;
+
+	pci_info(dev, "Apple: masking Alpine Ridge hotplug GPE 0x%02x for S3\n",
+		 gpe);
+	acpi_mask_gpe(NULL, gpe, true);
+}
+
+static void quirk_apple_alpine_ridge_resume(struct pci_dev *dev)
+{
+	u32 gpe = apple_alpine_ridge_gpe(dev);
+
+	if (!apple_alpine_ridge_root_port(dev))
+		return;
+
+	/*
+	 * Alpine Ridge is dead until the next reboot. Mark its whole subtree
+	 * disconnected so pci_dev_wait()/pci_bridge_wait_for_secondary_bus()
+	 * skip it instead of polling the unresponsive xHCI for ~60 s.
+	 */
+	if (dev->subordinate) {
+		pci_info(dev, "Apple: Alpine Ridge powered off across S3, marking subtree disconnected for fast resume\n");
+		pci_walk_bus(dev->subordinate, pci_dev_set_disconnected, NULL);
+	}
+
+	if (gpe)
+		acpi_mask_gpe(NULL, gpe, false);
+}
+/* Sunrise Point-LP PCH root ports hosting Alpine Ridge on MBP13,x */
+DECLARE_PCI_FIXUP_SUSPEND_LATE(PCI_VENDOR_ID_INTEL, 0x9d14,
+			       quirk_apple_alpine_ridge_suspend);
+DECLARE_PCI_FIXUP_SUSPEND_LATE(PCI_VENDOR_ID_INTEL, 0x9d18,
+			       quirk_apple_alpine_ridge_suspend);
+DECLARE_PCI_FIXUP_RESUME_EARLY(PCI_VENDOR_ID_INTEL, 0x9d14,
+			       quirk_apple_alpine_ridge_resume);
+DECLARE_PCI_FIXUP_RESUME_EARLY(PCI_VENDOR_ID_INTEL, 0x9d18,
+			       quirk_apple_alpine_ridge_resume);
+#endif
 #endif
 
 /*
