@@ -1758,11 +1758,15 @@ static int applespi_probe(struct spi_device *spi)
 	applespi_init(applespi, false);
 
 	/*
-	 * By default this device is not enabled for wakeup; but USB keyboards
-	 * generally are, so the expectation is that by default the keyboard
-	 * will wake the system.
+	 * GPE 0x17 doubles as the topcase input interrupt and this device's
+	 * S3 wake source. On MacBookPro13,x the keyboard/trackpad latch
+	 * spurious GPE 0x17 events that wake the machine almost immediately
+	 * after S3 entry (random auto-wakeup). Leave the device wakeup-capable
+	 * but disabled by default so it does not arm GPE 0x17 as an S3 wake
+	 * source; the system wakes via lid open / power button instead. Users
+	 * who want keypress-wake can still opt in via /sys/.../power/wakeup.
 	 */
-	device_wakeup_enable(&spi->dev);
+	device_set_wakeup_capable(&spi->dev, true);
 
 	/* set up keyboard-backlight */
 	sts = applespi_get_saved_bl_level(applespi);
