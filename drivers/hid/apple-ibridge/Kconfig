@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Apple iBridge (T1) touch bar / ALS support
+#
+
+config HID_APPLE_IBRIDGE
+	tristate "Apple iBridge (T1) MFD/HID demuxer"
+	depends on ACPI
+	depends on USB_HID
+	depends on X86 || COMPILE_TEST
+	help
+	  This is the core driver for the Apple iBridge chip (also known as
+	  the T1 chip) found in MacBookPro13,[23] and 14,[23]. It demuxes the
+	  shared iBridge HID device so the touch bar and ambient light sensor
+	  sub-drivers can each bind to it.
+
+	  To compile this driver as a module, choose M here: the module will
+	  be called apple-ibridge.
+
+config HID_APPLE_IB_TB
+	tristate "Apple iBridge Touch Bar"
+	depends on HID_APPLE_IBRIDGE
+	depends on INPUT
+	select INPUT_SPARSEKMAP
+	help
+	  Say Y here to enable basic touch bar support (turning the touch bar
+	  on, switching layouts based on the FN key, and dimming/blanking on
+	  idle) on MacBookPros with an Apple iBridge chip.
+
+	  To compile this driver as a module, choose M here: the module will
+	  be called apple-ib-tb.
+
+config HID_APPLE_IB_ALS
+	tristate "Apple iBridge Ambient Light Sensor"
+	depends on HID_APPLE_IBRIDGE
+	depends on IIO
+	select IIO_BUFFER
+	select IIO_TRIGGERED_BUFFER
+	help
+	  Say Y here to expose the ambient light sensor of the Apple iBridge
+	  chip as an IIO device.
+
+	  To compile this driver as a module, choose M here: the module will
+	  be called apple-ib-als.

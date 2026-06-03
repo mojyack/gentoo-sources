@@ -176,3 +176,7 @@ obj-$(CONFIG_AMD_SFH_HID)       += amd-sfh-hid/
 obj-$(CONFIG_SURFACE_HID_CORE)  += surface-hid/
 
 obj-$(CONFIG_INTEL_THC_HID)     += intel-thc-hid/
+
+obj-$(CONFIG_HID_APPLE_IBRIDGE)	+= apple-ibridge/
+obj-$(CONFIG_HID_APPLE_IB_TB)	+= apple-ibridge/
+obj-$(CONFIG_HID_APPLE_IB_ALS)	+= apple-ibridge/

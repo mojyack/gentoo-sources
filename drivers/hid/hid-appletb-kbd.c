@@ -21,19 +21,14 @@
 #include <linux/input/sparse-keymap.h>
 
 #include "hid-ids.h"
-
-#define APPLETB_KBD_MODE_ESC	0
-#define APPLETB_KBD_MODE_FN	1
-#define APPLETB_KBD_MODE_SPCL	2
-#define APPLETB_KBD_MODE_OFF	3
-#define APPLETB_KBD_MODE_MAX	APPLETB_KBD_MODE_OFF
+#include "apple-touchbar.h"
 
 #define APPLETB_DEVID_KEYBOARD	1
 #define APPLETB_DEVID_TRACKPAD	2
 
 #define HID_USAGE_MODE		0x00ff0004
 
-static int appletb_tb_def_mode = APPLETB_KBD_MODE_SPCL;
+static int appletb_tb_def_mode = APPLETB_MODE_SPCL;
 module_param_named(mode, appletb_tb_def_mode, int, 0444);
 MODULE_PARM_DESC(mode, "Default touchbar mode:\n"
 			 "    0 - escape key only\n"
@@ -67,23 +62,6 @@ struct appletb_kbd {
 	bool has_turned_off;
 	u8 saved_mode;
 	u8 current_mode;
-};
-
-static const struct key_entry appletb_kbd_keymap[] = {
-	{ KE_KEY, KEY_ESC, { KEY_ESC } },
-	{ KE_KEY, KEY_F1,  { KEY_BRIGHTNESSDOWN } },
-	{ KE_KEY, KEY_F2,  { KEY_BRIGHTNESSUP } },
-	{ KE_KEY, KEY_F3,  { KEY_RESERVED } },
-	{ KE_KEY, KEY_F4,  { KEY_RESERVED } },
-	{ KE_KEY, KEY_F5,  { KEY_KBDILLUMDOWN } },
-	{ KE_KEY, KEY_F6,  { KEY_KBDILLUMUP } },
-	{ KE_KEY, KEY_F7,  { KEY_PREVIOUSSONG } },
-	{ KE_KEY, KEY_F8,  { KEY_PLAYPAUSE } },
-	{ KE_KEY, KEY_F9,  { KEY_NEXTSONG } },
-	{ KE_KEY, KEY_F10, { KEY_MUTE } },
-	{ KE_KEY, KEY_F11, { KEY_VOLUMEDOWN } },
-	{ KE_KEY, KEY_F12, { KEY_VOLUMEUP } },
-	{ KE_END, 0 }
 };
 
 static int appletb_kbd_set_mode(struct appletb_kbd *kbd, u8 mode)
@@ -134,7 +112,7 @@ static ssize_t mode_store(struct device *dev,
 	if (ret)
 		return ret;
 
-	if (mode > APPLETB_KBD_MODE_MAX)
+	if (mode > APPLETB_MODE_MAX)
 		return -EINVAL;
 
 	ret = appletb_kbd_set_mode(kbd, mode);
@@ -148,21 +126,6 @@ static struct attribute *appletb_kbd_attrs[] = {
 	NULL
 };
 ATTRIBUTE_GROUPS(appletb_kbd);
-
-static int appletb_tb_key_to_slot(unsigned int code)
-{
-	switch (code) {
-	case KEY_ESC:
-		return 0;
-	case KEY_F1 ... KEY_F10:
-		return code - KEY_F1 + 1;
-	case KEY_F11 ... KEY_F12:
-		return code - KEY_F11 + 11;
-
-	default:
-		return -EINVAL;
-	}
-}
 
 static void appletb_inactivity_timer(struct timer_list *t)
 {
@@ -222,13 +185,13 @@ static int appletb_kbd_hid_event(struct hid_device *hdev, struct hid_field *fiel
 
 	translation = sparse_keymap_entry_from_scancode(input, usage->code);
 
-	if (translation && kbd->current_mode == APPLETB_KBD_MODE_SPCL) {
+	if (translation && kbd->current_mode == APPLETB_MODE_SPCL) {
 		input_event(input, usage->type, translation->keycode, value);
 
 		return 1;
 	}
 
-	return kbd->current_mode == APPLETB_KBD_MODE_OFF;
+	return kbd->current_mode == APPLETB_MODE_OFF;
 }
 
 static void appletb_kbd_inp_event(struct input_handle *handle, unsigned int type,
@@ -239,12 +202,12 @@ static void appletb_kbd_inp_event(struct input_handle *handle, unsigned int type
 	reset_inactivity_timer(kbd);
 
 	if (type == EV_KEY && code == KEY_FN && appletb_tb_fn_toggle &&
-		(kbd->current_mode == APPLETB_KBD_MODE_SPCL ||
-		 kbd->current_mode == APPLETB_KBD_MODE_FN)) {
+		(kbd->current_mode == APPLETB_MODE_SPCL ||
+		 kbd->current_mode == APPLETB_MODE_FN)) {
 		if (value == 1) {
 			kbd->saved_mode = kbd->current_mode;
-			appletb_kbd_set_mode(kbd, kbd->current_mode == APPLETB_KBD_MODE_SPCL
-						? APPLETB_KBD_MODE_FN : APPLETB_KBD_MODE_SPCL);
+			appletb_kbd_set_mode(kbd, kbd->current_mode == APPLETB_MODE_SPCL
+						? APPLETB_MODE_FN : APPLETB_MODE_SPCL);
 		} else if (value == 0) {
 			if (kbd->saved_mode != kbd->current_mode)
 				appletb_kbd_set_mode(kbd, kbd->saved_mode);
@@ -320,10 +283,10 @@ static int appletb_kbd_input_configured(struct hid_device *hdev, struct hid_inpu
 
 	__set_bit(EV_REP, input->evbit);
 
-	sparse_keymap_setup(input, appletb_kbd_keymap, NULL);
+	sparse_keymap_setup(input, appletb_fn_keymap, NULL);
 
-	for (idx = 0; appletb_kbd_keymap[idx].type != KE_END; idx++)
-		input_set_capability(input, EV_KEY, appletb_kbd_keymap[idx].code);
+	for (idx = 0; appletb_fn_keymap[idx].type != KE_END; idx++)
+		input_set_capability(input, EV_KEY, appletb_fn_keymap[idx].code);
 
 	return 0;
 }
@@ -454,7 +417,7 @@ static void appletb_kbd_remove(struct hid_device *hdev)
 {
 	struct appletb_kbd *kbd = hid_get_drvdata(hdev);
 
-	appletb_kbd_set_mode(kbd, APPLETB_KBD_MODE_OFF);
+	appletb_kbd_set_mode(kbd, APPLETB_MODE_OFF);
 
 	input_unregister_handler(&kbd->inp_handler);
 	if (kbd->backlight_dev) {
@@ -472,7 +435,7 @@ static int appletb_kbd_suspend(struct hid_device *hdev, pm_message_t msg)
 	struct appletb_kbd *kbd = hid_get_drvdata(hdev);
 
 	kbd->saved_mode = kbd->current_mode;
-	appletb_kbd_set_mode(kbd, APPLETB_KBD_MODE_OFF);
+	appletb_kbd_set_mode(kbd, APPLETB_MODE_OFF);
 
 	return 0;
 }
