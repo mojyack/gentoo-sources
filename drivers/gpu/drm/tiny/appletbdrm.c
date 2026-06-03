@@ -41,6 +41,7 @@
 #define APPLETBDRM_MSG_GET_INFORMATION	cpu_to_le32(0x47494e46) /* GINF */
 #define APPLETBDRM_MSG_UPDATE_COMPLETE	cpu_to_le32(0x5544434c) /* UDCL */
 #define APPLETBDRM_MSG_SIGNAL_READINESS	cpu_to_le32(0x52454459) /* REDY */
+#define APPLETBDRM_MSG_STATUS		cpu_to_le32(0x53544154) /* STAT (T1) */
 
 #define APPLETBDRM_BULK_MSG_TIMEOUT	1000
 
@@ -129,6 +130,17 @@ struct appletbdrm_device {
 	unsigned int width;
 	unsigned int height;
 
+	/*
+	 * T1 (iBridge) quirks: the panel lives on interface 3 of the composite
+	 * 05ac:8600 device (OS X config), prefixes every reply with a 16-byte
+	 * echo of the request header, and emits a one-off STAT reply right after
+	 * the configuration is set. Like T2 it acknowledges frame writes (and
+	 * CLRD) with a UDCL reply (after the echo), which must be drained or the
+	 * panel's IN buffer fills and it NAKs further frame writes (-ETIMEDOUT on
+	 * OUT).
+	 */
+	bool is_t1;
+
 	struct drm_device drm;
 	struct drm_display_mode mode;
 	struct drm_connector connector;
@@ -180,7 +192,7 @@ static int appletbdrm_read_response(struct appletbdrm_device *adev,
 	struct usb_device *udev = adev_to_udev(adev);
 	struct drm_device *drm = &adev->drm;
 	int ret, actual_size;
-	bool readiness_signal_received = false;
+	int retries = 0;
 
 retry:
 	ret = usb_bulk_msg(udev, usb_rcvbulkpipe(udev, adev->in_ep),
@@ -191,18 +203,28 @@ retry:
 	}
 
 	/*
+	 * T1 prefixes every reply with a 16-byte echo of the request header;
+	 * skip it (must be checked before dereferencing response->msg, which
+	 * lives past the end of such a short transfer).
+	 */
+	if (adev->is_t1 &&
+	    actual_size == sizeof(struct appletbdrm_msg_request_header))
+		goto skip;
+
+	/*
 	 * The device responds to the first request sent in a particular
 	 * timeframe after the USB device configuration is set with a readiness
-	 * signal, in which case the response should be read again
+	 * signal (REDY), or a status reply (STAT) on T1, in which case the
+	 * response should be read again.
 	 */
-	if (response->msg == APPLETBDRM_MSG_SIGNAL_READINESS) {
-		if (!readiness_signal_received) {
-			readiness_signal_received = true;
-			goto retry;
+	if (response->msg == APPLETBDRM_MSG_SIGNAL_READINESS ||
+	    (adev->is_t1 && response->msg == APPLETBDRM_MSG_STATUS)) {
+skip:
+		if (++retries > 8) {
+			drm_err(drm, "No valid response after %d retries\n", retries);
+			return -EINTR;
 		}
-
-		drm_err(drm, "Encountered unexpected readiness signal\n");
-		return -EINTR;
+		goto retry;
 	}
 
 	if (actual_size != size) {
@@ -244,7 +266,31 @@ static int appletbdrm_send_msg(struct appletbdrm_device *adev, __le32 msg)
 
 static int appletbdrm_clear_display(struct appletbdrm_device *adev)
 {
-	return appletbdrm_send_msg(adev, APPLETBDRM_MSG_CLEAR_DISPLAY);
+	struct appletbdrm_fb_request_response *response;
+	int ret;
+
+	ret = appletbdrm_send_msg(adev, APPLETBDRM_MSG_CLEAR_DISPLAY);
+	if (ret)
+		return ret;
+
+	/*
+	 * T1 acknowledges CLRD with a UDCL reply, like a frame write. Drain it
+	 * (and any preceding echo/readiness messages) so it is not left in the
+	 * IN buffer where the first frame would read it as its own
+	 * acknowledgement, desyncing every frame's timestamp by one.
+	 */
+	if (adev->is_t1) {
+		response = kzalloc(sizeof(*response), GFP_KERNEL);
+		if (!response)
+			return -ENOMEM;
+
+		ret = appletbdrm_read_response(adev, &response->header,
+					       sizeof(*response),
+					       APPLETBDRM_MSG_UPDATE_COMPLETE);
+		kfree(response);
+	}
+
+	return ret;
 }
 
 static int appletbdrm_signal_readiness(struct appletbdrm_device *adev)
@@ -450,6 +496,12 @@ static int appletbdrm_flush_damage(struct appletbdrm_device *adev,
 	if (ret)
 		goto end_fb_cpu_access;
 
+	/*
+	 * Both T1 and T2 acknowledge the frame with a UDCL reply that must be
+	 * drained; on T1 it is preceded by the 16-byte request-header echo, which
+	 * appletbdrm_read_response() skips. Leaving the reply unread backs up the
+	 * panel's IN buffer until it NAKs further frame writes (-ETIMEDOUT on OUT).
+	 */
 	ret = appletbdrm_read_response(adev, &response->header, sizeof(*response),
 				       APPLETBDRM_MSG_UPDATE_COMPLETE);
 	if (ret)
@@ -748,6 +800,7 @@ static int appletbdrm_probe(struct usb_interface *intf,
 
 	adev->in_ep = bulk_in->bEndpointAddress;
 	adev->out_ep = bulk_out->bEndpointAddress;
+	adev->is_t1 = id->driver_info;
 
 	drm = &adev->drm;
 
@@ -815,7 +868,15 @@ static void appletbdrm_shutdown(struct usb_interface *intf)
 }
 
 static const struct usb_device_id appletbdrm_usb_id_table[] = {
+	/* MacBook Pro 2018-2019 (T2): standalone iBridge DFR display */
 	{ USB_DEVICE_INTERFACE_CLASS(0x05ac, 0x8302, USB_CLASS_AUDIO_VIDEO) },
+	/*
+	 * MacBook Pro 2016-2017 (T1): the touch bar display is interface 3 of
+	 * the composite iBridge device, present only in the "OS X" USB config
+	 * (selected via the apple-ibridge "config=2" module parameter).
+	 */
+	{ USB_DEVICE_INTERFACE_CLASS(0x05ac, 0x8600, USB_CLASS_AUDIO_VIDEO),
+	  .driver_info = 1 },
 	{}
 };
 MODULE_DEVICE_TABLE(usb, appletbdrm_usb_id_table);
