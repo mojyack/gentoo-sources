@@ -2537,6 +2537,14 @@ static const struct hid_device_id mt_devices[] = {
 	{ .driver_data = MT_CLS_APPLE_TOUCHBAR,
 		HID_USB_DEVICE(USB_VENDOR_ID_APPLE,
 			USB_DEVICE_ID_APPLE_TOUCHBAR_DISPLAY) },
+	/*
+	 * T1 iBridge: the touch bar digitizer is one HID interface of the
+	 * composite device (OS X config). The mt_probe() Touch Pad /
+	 * Transducer-Index check rejects the device's other interfaces.
+	 */
+	{ .driver_data = MT_CLS_APPLE_TOUCHBAR,
+		HID_USB_DEVICE(USB_VENDOR_ID_APPLE,
+			USB_DEVICE_ID_APPLE_IBRIDGE) },
 
 	/* Google MT devices */
 	{ .driver_data = MT_CLS_GOOGLE,
