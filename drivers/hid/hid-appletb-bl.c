@@ -186,6 +186,13 @@ static void appletb_bl_remove(struct hid_device *hdev)
 static const struct hid_device_id appletb_bl_hid_ids[] = {
 	/* MacBook Pro's 2018, 2019, with T2 chip: iBridge DFR Brightness */
 	{ HID_USB_DEVICE(USB_VENDOR_ID_APPLE, USB_DEVICE_ID_APPLE_TOUCHBAR_BACKLIGHT) },
+	/*
+	 * MacBook Pro's 2016, 2017, with T1 chip: the iBridge brightness
+	 * feature report lives on one of the composite device's HID interfaces
+	 * (present in the "OS X" USB config). Other interfaces of the same
+	 * device lack the brightness fields and are rejected in probe().
+	 */
+	{ HID_USB_DEVICE(USB_VENDOR_ID_APPLE, USB_DEVICE_ID_APPLE_IBRIDGE) },
 	{ }
 };
 MODULE_DEVICE_TABLE(hid, appletb_bl_hid_ids);
